@@ -11,9 +11,9 @@ Particularly, the database contains information that may not follow an OS licens
 
 - Instantiate the repository
 - Create the database
-- In a julia REPL, inclde `src/create-indexes.jl`, run `load_or_create_indexes()`
+- Create indexes In a julia REPL, inclde `src/create-indexes.jl`, run `load_or_create_indexes()`
 
-A database is bundled and indexes are created and saved. If database and indexes are already created this function will load them. You can solve searches as follow
+Then, a database is bundled and indexes are created and saved. If database and indexes are already created this function will load them. You can solve searches as follow
 
 ```julia
 
@@ -23,6 +23,20 @@ search_packages(P.D, P.nameidx, "neural networks", k)
 search_packages(P.D, P.descidx, "nearest neighbors similarity search", k)
 search_packages(P.D, P.readmeidx, "nearest neighbors similarity search", k)
 ```
+
+Sample files are also included in this repo.
+
+## Goal
+
+Help reducing gap for people looking for packages or looking for some clustered entry to packages (e.g., see candidate packages that solve some problem).
+
+## Ideas
+
+- Create a tool to search packages from commandline, it can be stand alone or running on a centralized server with options to search on names, descriptions, and readme
+- Add scores for popularity (e.g., stars, graph-centrality)
+- Use LLM embeddings can be interesting but running them can be costly
+- Index and search function names and function documentations
+- Help developers to find packages or functions
 
 ## Notebooks
 
