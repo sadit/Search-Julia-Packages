@@ -4,7 +4,8 @@ using Glob, TextSearch, InvertedFiles, SimilaritySearch,
 
 function one_package(metafile)
     M = JSON.parse(read(metafile, String))
-    R = JSON.parse(read(joinpath(dirname(metafile), "Readme.json"), String))
+    dn = dirname(metafile)
+    R = JSON.parse(read(joinpath(dn, "Readme.json"), String))
     readme = String(base64decode(R["content"]))
     license = get(M, "license", nothing)
     license = license === nothing ? "" : get(license, "name", "")
@@ -13,7 +14,8 @@ function one_package(metafile)
     topics = get(M, "topics", nothing)
     topics = topics === nothing ? "" : join(topics, ' ')
     url = M["html_url"]
-    name = replace(basename(url), r".jl$" => "")
+    #name = replace(basename(url), r".jl$" => "")
+    name = basename(dn)
     stargazers_count = get(M, "stargazers_count", 0)
     (; name, url, description, topics, readme, license, stargazers_count)
 end
@@ -42,23 +44,28 @@ function package_dataset()
     D
 end
 
+function package_data(D, id, weight)
+    r = D[id, :]
+    desc = length(r.description) > 0 ? r.description : ""
+    topics = length(r.topics) > 0 ? r.topics : ""
+    Dict(
+        "id" => id,
+        "name" => r.name,
+        "description" => desc,
+        "topics" => topics,
+        "url" => r.url,
+        "score" => round(abs(weight), digits=2),
+        "gh-stars" => r.stargazers_count
+    )
+end
+
 function search_packages(D, idx, query, k)
     res = KnnResult(k)
     search(idx, query, res)
     R = Dict{String,Any}[]
 
     for (i, p) in enumerate(res)
-           r = D[p.id, :]
-           desc = length(r.description) > 0 ? r.description : ""
-           topics = length(r.topics) > 0 ? r.topics : ""
-           push!(R, Dict(
-               "name" => r.name,
-               "description" => desc,
-               "topics" => topics,
-               "url" => r.url,
-               "bm25-score" => round(abs(p.weight), digits=2),
-               "gh-stars" => r.stargazers_count
-              ))
+        push!(R, package_data(D, p.id, p.weight))
     end
 
     R
@@ -90,10 +97,11 @@ function load_or_create_indexes(; datadir="data")
     if isfile(descindex_file)
         descidx, _ = loadindex(descindex_file; staticgraph=true)
     else
-        descidx = BM25InvertedFile(TextConfig(nlist=[1], qlist=[4]), D.description) do t
+        corpus = [string(a, " ", b) for (a, b) in zip(D.description, D.topics)]
+        descidx = BM25InvertedFile(TextConfig(nlist=[1], qlist=[4]), corpus) do t
             3 <= t.ndocs <= 1000
         end
-        append_items!(descidx, D.description)
+        append_items!(descidx, corpus)
         saveindex(descindex_file, descidx)
     end
     
