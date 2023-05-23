@@ -18,8 +18,9 @@ end
 
     Rdesc = KnnResult(10k)
     Rreadme = KnnResult(10k)
-    wdesc = 0.66666f0
-    wreadme = 0.33333f0
+    wname = get(params, "name_weight", 1f0)
+    wdesc = get(params, "desc_weight", 0.6666f0)
+    wreadme = get(params, "readme_weight", 0.33333f0)
 
     res = KnnResult(10k)
     search(X.nameidx, q, res)

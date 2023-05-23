@@ -115,7 +115,6 @@ function load_or_create_indexes(; datadir="data")
         saveindex(readmeindex_file, readmeidx)
     end
 
-
     (; D, nameidx, descidx, readmeidx)
 end
 
