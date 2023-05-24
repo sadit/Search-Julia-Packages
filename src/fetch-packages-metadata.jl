@@ -3,15 +3,16 @@ using Downloads: download, RequestError
 
 include("parse-registry.jl")
 
-function fetch_readme_from_github(url, version; verbose=false)
+#=function fetch_readme_from_github(url, version; verbose=false)
     url = replace(url, "github.com" => "raw.githubusercontent.com")
     readmeurl = joinpath(url, "v" * version, "README.md") 
     verbose && (@show readmeurl)
     buff = download(readmeurl, IOBuffer(); verbose=false)  # keep this as false unless something fails with the http connection 
     String(take!(buff))
-end
+end=#
 
-function fetch_meta_from_github(url; verbose=false)
+function fetch_meta_from_github(repo, subdir, version; verbose=false)
+    url = string(repo, "/", subdir) 
     verbose && (@show url)
     buff = download(url, IOBuffer(); verbose=false)
     page = String(take!(buff))
@@ -24,9 +25,9 @@ function fetch_meta_from_github(url; verbose=false)
     readme = ""
 
     description = match(r"""<meta name="description" content="(.+?)">""", page).captures[1]
-    m = match(r"<span.*?>(\d+)</span>\s*?stars", d)
+    m = match(r"<span.*?>(\d+)</span>\s*?stars", page)
     m !== nothing && (stars = parse(Int, m.captures[1]))
-    m = match(r"<article.*?>(.+)</article>"s, d)
+    m = match(r"<article.*?>(.+)</article>"s, page)
     if m !== nothing
         readme = replace(m.captures[1], r"<.+?>" => "", "&nbsp;" => "\n", "&gt;" => ">", "&lt;" => "<")
     end
@@ -34,7 +35,7 @@ function fetch_meta_from_github(url; verbose=false)
     description, join(topics, ';'), readme, stars
 end
 
-function fetch_readme(repo, subdir, version; verbose=false)
+function fetch_meta_from_gitlab(repo, subdir, version; verbose=false)
     if occursin("github.com", repo)
         url = replace(repo, "github.com" => "raw.githubusercontent.com")
         if subdir != ""
@@ -50,27 +51,23 @@ function fetch_readme(repo, subdir, version; verbose=false)
     verbose && (@info repo => url)
     buff = download(url, IOBuffer(); verbose=false)  # keep this as false unless something fails with the http connection 
     verbose && (@info repo => "OK")
-    String(take!(buff))
+    readme = String(take!(buff)) 
+    stars = -1
+    topics = ""
+    description = ""
+    description, topics, readme, stars
 end
 
 function fetch_package_registry(row; verbose=false)
-    if ismissing(row.subdir) || isempty(row.subdir)
-        url = row.repo
-        subdir = ""
-    else
-        url =  joinpath(row.repo, row.subdir) 
-        subdir = row.subdir
-    end
-
     description = ""
     topics = ""
     readme = ""
+    stars = -1
     statusmeta = 200
-    statusreadme = 200
 
     if occursin("github.com", row.repo)
         try
-            description, topics = fetch_meta_from_github(url; verbose)
+            description, topics, readme, stars = fetch_meta_from_github(row.repo, row.subdir, row.version; verbose)
         catch err
             if err isa RequestError
                 @info "ignoring metadata from $(row.name) / $(row.repo)"
@@ -79,23 +76,24 @@ function fetch_package_registry(row; verbose=false)
                 rethrow()
             end
         end
-    end
-
-    for version in ["master", string("v", row.version), "main"]
-        try
-            readme = fetch_readme(row.repo, subdir, version; verbose)
-            break
-        catch err
-            if err isa RequestError
-                @info "retry readme $(row.name) / $(row.repo) - $version"
-                statusreadme = err.response.status
-            else
-                rethrow()
+    else
+        for version in ["master", string("v", row.version), "main"]
+            try
+                description, topics, readme, stars = fetch_meta_from_gitlab(row.repo, row.subdir, version; verbose)
+                break
+            catch err
+                if err isa RequestError
+                    @info "retry readme $(row.name) / $(row.repo) - $version"
+                    statusmeta = err.response.status
+                else
+                    rethrow()
+                end
             end
         end
     end
 
-    (; row.name, row.uuid, row.repo, subdir, row.version, fetched=Dates.now(), statusmeta, statusreadme, description, topics, readme)
+
+    (; row.name, row.uuid, row.repo, row.subdir, row.version, fetched=Dates.now(), statusmeta, description, topics, readme, stars)
 end
 
 
@@ -133,12 +131,11 @@ function load_meta_dataframe(filename)
 end
 
 function create_meta_dataframe()
-    DataFrame(name=String[], uuid=String[], repo=String[], subdir=String[], version=String[], fetched=DateTime[], statusmeta=Int[], statusreadme=Int[], description=String[], topics=String[], readme=String[])
+    DataFrame(name=String[], uuid=String[], repo=String[], subdir=String[], version=String[], fetched=DateTime[], statusmeta=Int[], description=String[], topics=String[], readme=String[], stars=Int[])
 end
 
 function create(
         registry;
-        update = false,
         verbose = true
     )
     
@@ -146,10 +143,9 @@ function create(
     Packages = parse_registry(registry)
 
     numpackages = length(Packages)
-    for (i, (name, row)) in enumerate(Packages)
-        occursin("github", row.repo) && continue
-        @info "$i of $numpackages -- $(row.name) - $(row.repo) - $(Dates.now())"
-        reg = fetch_package_registry(row; verbose)
+    for (i, (name, record)) in enumerate(Packages)
+        @info "$i of $numpackages -- $(record.name) - $(record.repo) - $(Dates.now())"
+        reg = fetch_package_registry(record; verbose)
         push!(D, reg)
         #rand() < 0.1 && break
     end
