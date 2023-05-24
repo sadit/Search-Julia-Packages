@@ -1,93 +1,158 @@
-#=using Pkg
-Pkg.add([
-    PackageSpec(name="JSON"),
-    PackageSpec(name="UnPack"),
-])=#
-
-using TOML, JSON, UnPack
+using TOML, JSON, DataFrames, CSV, Dates
 using Downloads: download, RequestError
 
-TOKEN = "token " * strip(read("PAT2.data", String))
+include("parse-registry.jl")
 
-function fetch_and_save_from_github_api(filename, url, update)
-    if !update && isfile(filename)
-        @info "$filename already exists"
-        return
+function fetch_readme_from_github(url, version; verbose=false)
+    url = replace(url, "github.com" => "raw.githubusercontent.com")
+    readmeurl = joinpath(url, "v" * version, "README.md") 
+    verbose && (@show readmeurl)
+    buff = download(readmeurl, IOBuffer(); verbose=false)  # keep this as false unless something fails with the http connection 
+    String(take!(buff))
+end
+
+function fetch_meta_from_github(url; verbose=false)
+    verbose && (@show url)
+    buff = download(url, IOBuffer(); verbose=false)
+    page = String(take!(buff))
+    topics = String[]
+    for m in eachmatch(r"/topics/([^\"]+)", page)
+        push!(topics, m.captures[1])
     end
-    
-    buff = download(url, IOBuffer(); verbose=false,
-        headers=Dict(
-            "User-Agent" => "donsadit@gmail.com",
-            "Authorization" => TOKEN
-        )
-    )
-    open(filename, "w") do f
-        write(f, take!(buff))
+
+    stars = 0
+    readme = ""
+
+    description = match(r"""<meta name="description" content="(.+?)">""", page).captures[1]
+    m = match(r"<span.*?>(\d+)</span>\s*?stars", d)
+    m !== nothing && (stars = parse(Int, m.captures[1]))
+    m = match(r"<article.*?>(.+)</article>"s, d)
+    if m !== nothing
+        readme = replace(m.captures[1], r"<.+?>" => "", "&nbsp;" => "\n", "&gt;" => ">", "&lt;" => "<")
     end
-    # to be under gh limits 
-    sleep(2)
+
+    description, join(topics, ';'), readme, stars
 end
 
-function fetch_metadata(username, reponame, outpath, update)
-    filename = joinpath(outpath, "Metadata.json")
-    url = "https://api.github.com/repos/$(username)/$(reponame)"
-    fetch_and_save_from_github_api(filename, url, update)
+function fetch_readme(repo, subdir, version; verbose=false)
+    if occursin("github.com", repo)
+        url = replace(repo, "github.com" => "raw.githubusercontent.com")
+        if subdir != ""
+            subdir = string(subdir, "/")
+        end
+        url = string(url, "/", version, "/", subdir, "README.md") 
+    elseif occursin("gitlab.com", repo)
+        url = string(repo, "/-/raw/", version, "/", "README.md") 
+    else
+        url = string(repo, "/", "README.md") 
+    end
+
+    verbose && (@info repo => url)
+    buff = download(url, IOBuffer(); verbose=false)  # keep this as false unless something fails with the http connection 
+    verbose && (@info repo => "OK")
+    String(take!(buff))
 end
 
-function fetch_readme(username, reponame, outpath, update)
-    filename = joinpath(outpath, "Readme.json")
-    url = "https://api.github.com/repos/$(username)/$(reponame)/readme"
-    fetch_and_save_from_github_api(filename, url, update)
-end
+function fetch_package_registry(row; verbose=false)
+    if ismissing(row.subdir) || isempty(row.subdir)
+        url = row.repo
+        subdir = ""
+    else
+        url =  joinpath(row.repo, row.subdir) 
+        subdir = row.subdir
+    end
 
-function fetch_repo(packagefile, outrepopath, update)
-    D = TOML.parsefile(packagefile)
-    repo = D["repo"]
-    username, reponame = splitpath(repo)[end-1:end]
-    # check github
-    reponame = replace(reponame, ".jl.git" => ".jl")
-    fetch_metadata(username, reponame, outrepopath, update)
-    fetch_readme(username, reponame, outrepopath, update)
-end
+    description = ""
+    topics = ""
+    readme = ""
+    statusmeta = 200
+    statusreadme = 200
 
-function main(;
-        update = false,
-        registrypath = "General",
-        outpath = "PackageData"
-    )
-    
-    mkpath(outpath)
-
-    R = TOML.parsefile(joinpath(registrypath, "Registry.toml"))
-    Packages = R["packages"]
-    n = length(Packages)
-    for (i, (uuid, p_)) in enumerate(Packages)
-        @label retry_label
-        @unpack name, path = p_
-        # endswith(name, "_jll") && continue
-        println("downloading $i of $n -- $name")
-        packagefile = joinpath(registrypath, path, "Package.toml")
-        outrepopath = joinpath(outpath, path)
-        mkpath(outrepopath)
+    if occursin("github.com", row.repo)
         try
-            fetch_repo(packagefile, outrepopath, update)
+            description, topics = fetch_meta_from_github(url; verbose)
         catch err
-            @info "===== ERROR while fetching package $uuid, $p_"
-            @info err
             if err isa RequestError
-                if err.response.status == 403
-                    #@info "Please launch the process in one hour or so"
-                    #rethrow()  ## or sleep?
-                    @info "RequestError: sleeping and retrying"
-                    sleep(180)
-                    @goto retry_label
-                else
-                    @info "Ignoring package - please check this issue"
-                end
+                @info "ignoring metadata from $(row.name) / $(row.repo)"
+                statusmeta = err.response.status
             else
                 rethrow()
             end
         end
-        
     end
+
+    for version in ["master", string("v", row.version), "main"]
+        try
+            readme = fetch_readme(row.repo, subdir, version; verbose)
+            break
+        catch err
+            if err isa RequestError
+                @info "retry readme $(row.name) / $(row.repo) - $version"
+                statusreadme = err.response.status
+            else
+                rethrow()
+            end
+        end
+    end
+
+    (; row.name, row.uuid, row.repo, subdir, row.version, fetched=Dates.now(), statusmeta, statusreadme, description, topics, readme)
+end
+
+
+function update(registrypath, prevfile; verbose=false)
+    updatedreg = parse_registry(registrypath)
+    prev = load_meta_dataframe(prevfile)
+    D = create_meta_dataframe()
+    idxprev = Dict(name => i for (i, name) in enumerate(prev.name))
+   
+    n = length(updatedreg)
+    count = 1
+    for (name, reg) in updatedreg
+        i = get(idxprev, name, 0)
+        @info "precessing $count / $n - $name ($i)"
+        count += 1
+        if i == 0
+            newreg = fetch_package_registry(reg; verbose)
+            push!(D, newreg)
+            continue
+        end
+
+        row = prev[i, :]
+        if row.readme == ""
+            push!(D, fetch_package_registry(reg; verbose))
+        else
+            push!(D, row)
+        end
+    end
+
+    D
+end
+
+function load_meta_dataframe(filename)
+    CSV.read(filename, DataFrame, missingstring="XXXXXXX", types=Dict(:fetched => DateTime, :statusmeta => Int, :statusreadme => Int))
+end
+
+function create_meta_dataframe()
+    DataFrame(name=String[], uuid=String[], repo=String[], subdir=String[], version=String[], fetched=DateTime[], statusmeta=Int[], statusreadme=Int[], description=String[], topics=String[], readme=String[])
+end
+
+function create(
+        registry;
+        update = false,
+        verbose = true
+    )
+    
+    D = create_meta_dataframe()
+    Packages = parse_registry(registry)
+
+    numpackages = length(Packages)
+    for (i, (name, row)) in enumerate(Packages)
+        occursin("github", row.repo) && continue
+        @info "$i of $numpackages -- $(row.name) - $(row.repo) - $(Dates.now())"
+        reg = fetch_package_registry(row; verbose)
+        push!(D, reg)
+        #rand() < 0.1 && break
+    end
+
+    D
 end

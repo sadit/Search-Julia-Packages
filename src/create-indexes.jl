@@ -71,7 +71,6 @@ function search_packages(D, idx, query, k)
     R
 end
 
-
 function load_or_create_indexes(; datadir="data")
     mkpath(datadir)
     dataset_file = joinpath(datadir, "packages.parquet")
