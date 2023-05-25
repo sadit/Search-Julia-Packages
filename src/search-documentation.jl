@@ -1,7 +1,11 @@
 using Downloads: download
 using SimilaritySearch, TextSearch, JSON, Markdown
 
+"""
+    get_doc(M::Module)
 
+Retrieves documentations from a module, prepares a kind of database to be indexed
+"""
 function get_doc(M::Module)
     D = []
     for fn in names(M)
@@ -14,6 +18,13 @@ function get_doc(M::Module)
     D
 end
 
+"""
+    get_doc_lunr(url; version="dev", branch="gh-pages")
+
+Retrieves documentations from a github repo that contains a Lunr search index. This is useful to search without installing a package.
+
+It receives the url to avoid loading the package dataframe. It also supposes using `gh-pages` and more things.
+"""
 function get_doc_lunr(url; version="dev", branch="gh-pages")
     url = replace(url, "github.com" => "raw.githubusercontent.com")
     url = joinpath(url, "$branch/$version/search_index.js")
@@ -24,6 +35,11 @@ function get_doc_lunr(url; version="dev", branch="gh-pages")
     [p for p in JSON.parse(@view s[n+1:end])["docs"] if !(p["category"] in ("section", "page"))]
 end
 
+"""
+    create_index(db; minfreq=2, maxfreqp=0.5, nlist=Int[], qlist=Int[4])
+
+Creates and index from a given dataset. See [@ref](`get_doc`) and [@ref](`get_doc_lunr`)
+"""
 function create_index(db; minfreq=2, maxfreqp=0.5, nlist=Int[], qlist=Int[4])
     corpus = [p["text"] for p in db]
     docs = BM25InvertedFile(TextConfig(qlist=[4]), corpus) do t
@@ -41,6 +57,11 @@ function create_index(db; minfreq=2, maxfreqp=0.5, nlist=Int[], qlist=Int[4])
     (; db, docs, names)
 end
 
+"""
+    search_doc_api(X, qtext; k=3)
+
+Searches (an index and database tuple `create_index`) and returns a list of dictionaries (useful for JSON serialization)
+"""
 function search_doc_api(X, qtext; k=3)
     res = KnnResult(k)
     search(X.invfile, qtext, res)
@@ -59,6 +80,19 @@ function search_doc_api(X, qtext; k=3)
     R
 end
 
+"""
+    search_doc(X, qtext; k=3, expansion=k, name_weight=1f0, doc_weight=0.5f0, snippet=128)
+
+Searches and index (an index and a database tuple created with [@ref](`create_index`)), showing results on the screen
+
+- `X`: the index and db
+- `qtext`: the query in plain text
+- `k`: the number of expected results
+- `expansion`: this method uses two indexes (package names and docs) and reranking, this factor indicates an expansion factor to compute individual ranks
+- `name_weight`: The weight given to the _name_ score
+- `doc_weight`: The weight given to the _documentation_ score
+- `snippet`: Controls the size of the snippet to show, snippet=0 suppress it, snippet < 0 shows the entire snippet, snippet > 0 shows that number of chars (can raise some errors on unicode chars!!) 
+"""
 function search_doc(X, qtext; k=3, expansion=k, name_weight=1f0, doc_weight=0.5f0, snippet=128)
     res = KnnResult(expansion * k)
     search(X.names, qtext, res)
@@ -89,5 +123,3 @@ function search_doc(X, qtext; k=3, expansion=k, name_weight=1f0, doc_weight=0.5f
     end
 end
 
-# db = load_lunr_corpus_from_github("https://github.com/sadit/SimilaritySearch.jl")
-# X = create_index(db)

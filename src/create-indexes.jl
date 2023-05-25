@@ -1,7 +1,12 @@
 using Glob, TextSearch, InvertedFiles, SimilaritySearch,
-    JLD2, JSON, CategoricalArrays, Base64, DataFrames,
-    Parquet2, Markdown
+    JLD2, JSON, CategoricalArrays, Base64, DataFrames, Markdown
 
+
+"""
+    package_data(D, id, weight)
+
+Creates a dictionary with package information, useful to present or JSON serialization (e.g., web api)
+"""
 function package_data(D, id, weight)
     r = D[id, :]
 
@@ -18,6 +23,14 @@ function package_data(D, id, weight)
     )
 end
 
+"""
+    search_packages(D, idx, query, k)
+
+
+Find best `k` matches for the given `query` in the given index `idx`. 
+Return an array of results with [@ref](package_data).
+
+"""
 function search_packages(D, idx, query, k)
     res = KnnResult(k)
     search(idx, query, res)
@@ -30,6 +43,14 @@ function search_packages(D, idx, query, k)
     R
 end
 
+"""
+    load_or_create_indexes(pkgs; datadir="data")
+
+Load the set name and readme (description, topics, readme, etc) indexes,
+using the `pkgs` dataframe, see [@ref](`load_meta_dataframe`).
+
+Creates indexes and save them if they are not found in the given path.
+"""
 function load_or_create_indexes(pkgs; datadir="data")
     mkpath(datadir)
     nameindex_file = joinpath(datadir, "nameidx.jld2")
@@ -58,9 +79,3 @@ function load_or_create_indexes(pkgs; datadir="data")
     (; pkgs, nameidx, readmeidx)
 end
 
-#=
-P = load_or_create_indexes()
-k = 5
-search_packages(P.D, P.nameidx, "neural networks", k)
-search_packages(P.D, P.readmeidx, "nearest neighbors similarity search", k)
-=#

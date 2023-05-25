@@ -11,6 +11,11 @@ include("parse-registry.jl")
     String(take!(buff))
 end=#
 
+"""
+    fetch_meta_from_github(repo, subdir, version; verbose=false)
+
+Fetches meta information from github repo (description, topics, starts, readme)
+"""
 function fetch_meta_from_github(repo, subdir, version; verbose=false)
     url = string(repo, "/", subdir) 
     verbose && (@show url)
@@ -35,6 +40,13 @@ function fetch_meta_from_github(repo, subdir, version; verbose=false)
     description, join(topics, ';'), readme, stars
 end
 
+"""
+    fetch_meta_from_gitlab(repo, subdir, version; verbose=false)
+
+
+Retrieves metadata from gitlab repo; only fetches readme to be precise, the rest is set to blank strings.
+See [@ref](`fetch_meta_from_github`)
+"""
 function fetch_meta_from_gitlab(repo, subdir, version; verbose=false)
     if occursin("github.com", repo)
         url = replace(repo, "github.com" => "raw.githubusercontent.com")
@@ -58,6 +70,11 @@ function fetch_meta_from_gitlab(repo, subdir, version; verbose=false)
     description, topics, readme, stars
 end
 
+"""
+    fetch_package_registry(row; verbose=false)
+
+Fetches package from registry, uses row as a previous information source (a named tuple or a row of the packages dataframe)
+"""
 function fetch_package_registry(row; verbose=false)
     description = ""
     topics = ""
@@ -96,7 +113,12 @@ function fetch_package_registry(row; verbose=false)
     (; row.name, row.uuid, row.repo, row.subdir, row.version, fetched=Dates.now(), statusmeta, description, topics, readme, stars)
 end
 
+"""
+    update(registrypath, prevfile; verbose=false)
 
+
+Updates a package database with new information retrived from a registry (e.g., a fresh pulled General registry)
+"""
 function update(registrypath, prevfile; verbose=false)
     updatedreg = parse_registry(registrypath)
     prev = load_meta_dataframe(prevfile)
@@ -126,14 +148,32 @@ function update(registrypath, prevfile; verbose=false)
     D
 end
 
+"""
+    load_meta_dataframe(filename)
+
+Loads package registry's dataframe, some methods suppose some types that are specified in this function.
+Some types are interpreted wrongly, also some methods expect empty strings instead of `missing` values.
+"""
 function load_meta_dataframe(filename)
     CSV.read(filename, DataFrame, missingstring="XXXXXXX", types=Dict(:fetched => DateTime, :statusmeta => Int, :stars => Int))
 end
 
+
+"""
+    create_meta_dataframe()
+
+Creates an empty package registry's dataframe
+"""
 function create_meta_dataframe()
     DataFrame(name=String[], uuid=String[], repo=String[], subdir=String[], version=String[], fetched=DateTime[], statusmeta=Int[], description=String[], topics=String[], readme=String[], stars=Int[])
 end
 
+
+"""
+    create(registry; verbose = true)
+
+Parses a fresh registry repo (e.g., General registry) and creates a package registry's dataframe
+"""
 function create(
         registry;
         verbose = true

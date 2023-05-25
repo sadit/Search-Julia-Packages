@@ -1,5 +1,11 @@
 using TOML, JSON, DataFrames, CSV, Glob
 
+
+"""
+    parse_registry(registrypath = "General") 
+
+Reads and parses a registry repo and creates a list of dictionaries with package metadata
+"""
 function parse_registry(registrypath = "General") 
     R = TOML.parsefile(joinpath(registrypath, "Registry.toml"))
     Packages = R["packages"]
@@ -21,6 +27,7 @@ function parse_registry(registrypath = "General")
     D
 end
 
+#=
 function parse_registry_table(registrypath = "General") 
     Packages = parse_registry(registrypath)
     D = DataFrame(name=String[], uuid=String[], repo=String[], subdir=String[], version=String[])
@@ -38,3 +45,4 @@ function create_registry_table(regname = "General")
     @info "saving $outname"
     CSV.write(outname, D)
 end
+=#
