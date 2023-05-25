@@ -2,7 +2,7 @@ using Downloads: download
 using SimilaritySearch, TextSearch, JSON, Markdown
 
 
-function documentation(M::Module)
+function get_doc(M::Module)
     D = []
     for fn in names(M)
         f = getfield(M, fn)
@@ -14,7 +14,7 @@ function documentation(M::Module)
     D
 end
 
-function load_lunr_corpus_from_github(url; version="dev", branch="gh-pages")
+function get_doc_lunr(url; version="dev", branch="gh-pages")
     url = replace(url, "github.com" => "raw.githubusercontent.com")
     url = joinpath(url, "$branch/$version/search_index.js")
     @info url
@@ -24,7 +24,7 @@ function load_lunr_corpus_from_github(url; version="dev", branch="gh-pages")
     [p for p in JSON.parse(@view s[n+1:end])["docs"] if !(p["category"] in ("section", "page"))]
 end
 
-function create_index(db; minfreq = 2, maxfreqp = 0.5)
+function create_index(db; minfreq=2, maxfreqp=0.5, nlist=Int[], qlist=Int[4])
     corpus = [p["text"] for p in db]
     docs = BM25InvertedFile(TextConfig(qlist=[4]), corpus) do t
         minfreq <= t.ndocs <= maxfreqp * length(corpus)
@@ -33,12 +33,11 @@ function create_index(db; minfreq = 2, maxfreqp = 0.5)
     append_items!(docs, corpus)
 
     corpus = [split(p["title"], ".")[end] for p in db]
-    names = BM25InvertedFile(TextConfig(qlist=[3]), corpus) do t
+    names = BM25InvertedFile(TextConfig(;qlist), corpus) do t
         minfreq <= t.ndocs <= maxfreqp * length(corpus)
     end
     
     append_items!(names, corpus)
-
     (; db, docs, names)
 end
 
